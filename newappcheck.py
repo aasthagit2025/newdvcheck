@@ -143,28 +143,37 @@ def find_straightliners(df, candidate_cols, threshold=0.85):
 # parse simple skip expressions into boolean mask (safe eval fallback)
 def parse_skip_expression_to_mask(expr, df):
     """
-    Safely parse skip expressions like
-    'OMQ2_r1<>1 OR OMQ2_r2=1 AND OMQ3<>99'
-    Supports <> (→!=), = (→==), AND/OR and multi-variable conditions.
-    Logs parsing errors gracefully.
+    Robust Sawtooth skip parser (case-insensitive).
+    Handles:
+      - NOT(), not(), <> , = , AND/OR, parentheses
+      - variable names with dots, underscores, or brackets
+      - no-space expressions (e.g., Not(Q1=1OrQ2=2))
+    Returns boolean Series mask for respondents to be skipped.
     """
+    expr_orig = str(expr)
     try:
-        expr2 = str(expr)
-        # Replace SQL-like operators with Python equivalents
-        expr2 = expr2.replace("<>", "!=")
-        # Replace lone '=' with '==' (but not inside !=)
-        expr2 = re.sub(r'(?<![!<>=])=(?!=)', '==', expr2)
-        # Replace logical words with Python operators
-        expr2 = re.sub(r'\bAND\b', '&', expr2, flags=re.IGNORECASE)
-        expr2 = re.sub(r'\bOR\b', '|', expr2, flags=re.IGNORECASE)
-        # Replace variable names with dataframe references
-        for col in df.columns:
-            expr2 = re.sub(rf'\b{re.escape(col)}\b', f"df[{repr(col)}]", expr2)
-        mask = eval(expr2, {"df": df, "np": np, "pd": pd})
-        return mask.fillna(False).astype(bool)
-    except Exception as e:
-        # Return all False mask, app logs in Validation Report
-        st.warning(f"Skip Parsing Error for expression '{expr}': {e}")
+        e = expr_orig.strip()
+
+        # --- normalize logic operators (case-insensitive) ---
+        e = e.replace("<>", "!=")
+        e = re.sub(r'(?<![!<>=])=(?!=)', '==', e)               # single '=' → '=='
+        e = re.sub(r'(?i)\bAND\b', '&', e)
+        e = re.sub(r'(?i)\bOR\b', '|', e)
+        e = re.sub(r'(?i)\bNOT\s*\(', '~(', e)                  # handles all 'NOT(' cases
+        e = re.sub(r'\s+', ' ', e)                              # collapse spaces
+
+        # --- replace variable names with dataframe refs ---
+        for col in sorted(df.columns, key=len, reverse=True):
+            safe = re.escape(col)
+            e = re.sub(rf'(?<!\w){safe}(?!\w)',
+                       f"pd.to_numeric(df[{repr(col)}], errors='coerce')", e)
+
+        # --- safely evaluate expression ---
+        mask = eval(e, {"df": df, "pd": pd, "np": np})
+        return pd.Series(mask, index=df.index).fillna(False).astype(bool)
+
+    except Exception as err:
+        st.warning(f"Skip Parsing Error for expression '{expr_orig}': {err}")
         return pd.Series(False, index=df.index)
 
 
@@ -629,26 +638,47 @@ if st.session_state.get("_force_generate"):
                         "Respondent_IDs": format_ids(data_df.loc[mask_out, id_col])
                     })
             # Skip
-            elif 'skip' in rtype:
-                try:
-                    mask = parse_skip_expression_to_mask(r_applied, data_df)
-                    violators = data_df[mask & data_df[var].notna() & (data_df[var].astype(str).str.strip()!='')]
-                    if len(violators) > 0:
-                        detailed_findings.append({
-                            "Variable": var,
-                            "Check_Type": "Skip Violation",
-                            "Description": f"{len(violators)} respondents answered {var} though skip ({r_applied}) applies",
-                            "Affected_Count": int(len(violators)),
-                            "Respondent_IDs": format_ids(violators[id_col])
-                        })
-                except Exception as e:
-                    detailed_findings.append({
-                        "Variable": var,
-                        "Check_Type": "Skip Parsing Error",
-                        "Description": f"Could not parse skip rule: {r_applied}. Error: {e}",
-                        "Affected_Count": 0,
-                        "Respondent_IDs": ""
-                    })
+elif 'skip' in rtype:
+    try:
+        # parse skip condition
+        mask = parse_skip_expression_to_mask(r_applied, data_df).astype(bool)
+
+        # identify blanks properly
+        ans = data_df[var].astype(str).fillna('').str.strip()
+        blank = ans.eq('') | ans.str.lower().isin(['na', 'n/a', 'nan', 'none'])
+
+        # Violation 1 – answered when should skip
+        v1 = data_df[mask & ~blank]
+        # Violation 2 – skipped when should answer
+        v2 = data_df[(~mask) & blank]
+
+        if len(v1) > 0:
+            detailed_findings.append({
+                "Variable": var,
+                "Check_Type": "Skip Violation (Answered when should Skip)",
+                "Description": f"{len(v1)} respondents answered {var} though skip ({r_applied}) applies",
+                "Affected_Count": int(len(v1)),
+                "Respondent_IDs": format_ids(v1[id_col])
+            })
+
+        if len(v2) > 0:
+            detailed_findings.append({
+                "Variable": var,
+                "Check_Type": "Skip Violation (Skipped when should Answer)",
+                "Description": f"{len(v2)} respondents skipped {var} though skip ({r_applied}) was False",
+                "Affected_Count": int(len(v2)),
+                "Respondent_IDs": format_ids(v2[id_col])
+            })
+
+    except Exception as e:
+        detailed_findings.append({
+            "Variable": var,
+            "Check_Type": "Skip Parsing Error",
+            "Description": f"Could not parse skip rule: {r_applied}. Error: {e}",
+            "Affected_Count": 0,
+            "Respondent_IDs": ""
+        })
+
             # DK/Refused
             elif 'dk' in rtype or 'ref' in rtype:
                 s = data_df[var].astype(str)
