@@ -805,4 +805,3 @@ if st.session_state.get("detailed_df_preview") is not None:
             st.info("Validation Report file not available for download yet")
 
 # EOF
-
