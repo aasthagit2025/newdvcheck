@@ -28,7 +28,7 @@ st.markdown(
 )
 
 # ---------------- Sidebar uploads & controls ----------------
-st.sidebar.header("Upload files (Skips.csv: Skip From | Skip Type | Skip To | Logic | Comment)")
+st.sidebar.header("Upload files")
 raw_file = st.sidebar.file_uploader("Raw Data (Excel or CSV)", type=["xlsx","xls","csv"])
 skips_file = st.sidebar.file_uploader("Sawtooth Skips (CSV/XLSX) - use provided Skips.csv format", type=["csv","xlsx"])
 rules_template_file = st.sidebar.file_uploader("Optional: Validation Rules template (xlsx)", type=["xlsx"])
