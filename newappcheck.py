@@ -22,7 +22,7 @@ DEFAULT_DK_TOKENS = ["DK","Refused","Don't know","Dont know","Refuse","REFUSED"]
 
 # ---------------- Page ----------------
 st.set_page_config(page_title="KnowledgeExcel — DV Automation (29octapp)", layout="wide")
-st.title("KnowledgeExcel — Data Validation Automation (29octapp)")
+st.title("📊 Data Validation Tool")
 st.markdown(
     "Flow: Upload Raw Data + Sawtooth Skips (Skips.csv format) → Run → Download Validation Rules → (Optional) Upload revised rules → Confirm → Download Validation Report."
 )
