@@ -680,7 +680,7 @@ elif 'skip' in rtype:
         })
 
             # DK/Refused
-  elif 'dk' in rtype or 'ref' in rtype:
+            elif 'dk' in rtype or 'ref' in rtype:
                 s = data_df[var].astype(str)
                 coerced = pd.to_numeric(data_df[var], errors='coerce')
                 mask = s.str.strip().str.lower().isin([t.lower() for t in DK_TOKENS]) | coerced.isin(DK_CODES)
@@ -805,3 +805,4 @@ if st.session_state.get("detailed_df_preview") is not None:
             st.info("Validation Report file not available for download yet")
 
 # EOF
+
