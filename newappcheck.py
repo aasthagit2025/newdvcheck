@@ -156,26 +156,32 @@ def parse_skip_expression_to_mask(expr, df):
 
         # --- normalize logic operators (case-insensitive) ---
         e = e.replace("<>", "!=")
-        e = re.sub(r'(?<![!<>=])=(?!=)', '==', e)               # single '=' → '=='
+        e = re.sub(r'(?<![!<>=])=(?!=)', '==', e)  # single '=' → '=='
         e = re.sub(r'(?i)\bAND\b', '&', e)
         e = re.sub(r'(?i)\bOR\b', '|', e)
-        e = re.sub(r'(?i)\bNOT\s*\(', '~(', e)                  # handles all 'NOT(' cases
-        e = re.sub(r'\s+', ' ', e)                              # collapse spaces
+        e = re.sub(r'(?i)\bNOT\s*\(', '~(', e)  # handles all 'NOT(' cases
+        e = re.sub(r'\s+', ' ', e)
+
+        # --- ensure each comparison is wrapped ---
+        e = re.sub(r'([A-Za-z0-9_\.\[\]]+\s*==\s*[0-9A-Za-z]+)', r'(\1)', e)
 
         # --- replace variable names with dataframe refs ---
         for col in sorted(df.columns, key=len, reverse=True):
             safe = re.escape(col)
-            e = re.sub(rf'(?<!\w){safe}(?!\w)',
-                       f"pd.to_numeric(df[{repr(col)}], errors='coerce')", e)
+            e = re.sub(rf'(?<!\w){safe}(?!\w)', f"(pd.to_numeric(df[{repr(col)}], errors='coerce'))", e)
 
         # --- safely evaluate expression ---
         mask = eval(e, {"df": df, "pd": pd, "np": np})
-        return pd.Series(mask, index=df.index).fillna(False).astype(bool)
+        # ensure mask is a boolean Series
+        if isinstance(mask, (bool, np.bool_)):
+            mask = pd.Series([mask] * len(df), index=df.index)
+        elif not isinstance(mask, pd.Series):
+            mask = pd.Series(mask, index=df.index)
+        return mask.fillna(False).astype(bool)
 
     except Exception as err:
         st.warning(f"Skip Parsing Error for expression '{expr_orig}': {err}")
         return pd.Series(False, index=df.index)
-
 
 def group_variables(vars_list: List[str]) -> dict:
     groups = {}
